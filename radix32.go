@@ -1,20 +1,29 @@
 // Package bitradix implements a radix tree that branches on the bits of a 32 or
 // 64 bits unsigned integer key.
-//                                                                                                  
+//
 // A radix tree is defined in:
 //    Donald R. Morrison. "PATRICIA -- practical algorithm to retrieve
 //    information coded in alphanumeric". Journal of the ACM, 15(4):514-534,
 //    October 1968
-// 
+//
 // This website provides some background information on Radix trees.
 // http://faculty.simpson.edu/lydia.sinapova/www/cmsc250/LN250_Weiss/L08-Radix.htm
 package bitradix
+
+import (
+	"errors"
+)
 
 const (
 	bitSize32 = 32
 	bitSize64 = 64
 	mask32    = 0xFFFFFFFF
 	mask64    = 0xFFFFFFFFFFFFFFFF
+)
+
+var (
+	ERR_BIT_INDEX_SMALL = errors.New("bitradix: bit index smaller than zero")
+	ERR_NOT_ROOT        = errors.New("bitradix: not the root node")
 )
 
 // Radix32 implements a radix tree with an uint32 as its key.
@@ -52,30 +61,30 @@ func (r *Radix32) Leaf() bool {
 	return r.branch[0] == nil && r.branch[1] == nil
 }
 
-// Insert inserts a new value n in the tree r (possibly silently overwriting an existing value). 
+// Insert inserts a new value n in the tree r (possibly silently overwriting an existing value).
 // It returns the inserted node, r must be the root of the tree.
-func (r *Radix32) Insert(n uint32, bits int, v interface{}) *Radix32 {
+func (r *Radix32) Insert(n uint32, bits int, v interface{}) (*Radix32, error) {
 	if r.parent != nil {
-		panic("bitradix: not the root node")
+		return nil, ERR_NOT_ROOT
 	}
 	return r.insert(n, bits, v, bitSize32-1)
 }
 
 // Remove removes a value from the tree r. It returns the node removed, or nil
 // when nothing is found, r must be the root of the tree.
-func (r *Radix32) Remove(n uint32, bits int) *Radix32 {
+func (r *Radix32) Remove(n uint32, bits int) (*Radix32, error) {
 	if r.parent != nil {
-		panic("bitradix: not the root node")
+		return nil, ERR_NOT_ROOT
 	}
-	return r.remove(n, bits, bitSize32-1)
+	return r.remove(n, bits, bitSize32-1), nil
 }
 
-// Find searches the tree for the key n, where the first bits bits of n 
-// are significant. It returns the node found or a node with a common prefix. It 
+// Find searches the tree for the key n, where the first bits bits of n
+// are significant. It returns the node found or a node with a common prefix. It
 // returns nil when nothing can be found.
-func (r *Radix32) Find(n uint32, bits int) *Radix32 {
+func (r *Radix32) Find(n uint32, bits int) (*Radix32, error) {
 	if r.parent != nil {
-		panic("bitradix: not the root node")
+		return nil, ERR_NOT_ROOT
 	}
 	return r.find(n, bits, bitSize32-1, nil)
 }
@@ -100,16 +109,17 @@ func (r *Radix32) Do(f func(*Radix32, int)) {
 }
 
 // Implement insert
-func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) *Radix32 {
+func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) (*Radix32, error) {
+	var err error
 	if bit < 0 {
-		panic("bitradix: bit index smaller than zero")
+		return nil, ERR_BIT_INDEX_SMALL
 	}
 	switch r.Leaf() {
 	case false: // Non-leaf node, one or two branches, possibly a key
 		bnew := bitK32(n, bit)
 		if r.bits == 0 && bits == bitSize32-bit { // I should be put here
 			r.set(n, bits, v)
-			return r
+			return r, nil
 		}
 		if r.bits > 0 && bits == bitSize32-bit {
 			bcur := bitK32(r.key, bit)
@@ -121,8 +131,8 @@ func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) *Radix32 {
 				if r.branch[bcur] == nil {
 					r.branch[bcur] = r.new()
 				}
-				r.branch[bcur].insert(n1, b1, v1, bit-1)
-				return r
+				_, err = r.branch[bcur].insert(n1, b1, v1, bit-1)
+				return r, err
 			}
 		}
 		if r.branch[bnew] == nil {
@@ -132,7 +142,7 @@ func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) *Radix32 {
 	case true: // External node, (optional) key, no branches
 		if r.bits == 0 || r.key == n { // nothing here yet, put something in, or equal keys
 			r.set(n, bits, v)
-			return r
+			return r, nil
 		}
 		bcur := bitK32(r.key, bit)
 		bnew := bitK32(n, bit)
@@ -144,7 +154,7 @@ func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) *Radix32 {
 				v1 := r.Value
 				r.set(n, bits, v)
 				r.branch[bnew].insert(n1, b1, v1, bit-1)
-				return r
+				return r, nil
 			}
 			if r.bits > 0 && bits >= r.bits {
 				// current key can not be put further down, leave it
@@ -164,7 +174,7 @@ func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) *Radix32 {
 		r.branch[bnew] = r.new()
 		return r.branch[bnew].insert(n, bits, v, bit-1)
 	}
-	panic("bitradix: not reached")
+	return nil, errors.New("bitradix: not reached")
 }
 
 // Walk the tree searching for n, keep the last node that has a key in tow.
@@ -224,7 +234,7 @@ func (r *Radix32) prune(b bool) {
 		if !b0.Leaf() {
 			return
 		}
-		// move b0 into this node	
+		// move b0 into this node
 		r.set(b0.key, b0.bits, b0.Value)
 		r.branch[0] = b0.branch[0]
 		r.branch[1] = b0.branch[1]
@@ -241,7 +251,7 @@ func (r *Radix32) prune(b bool) {
 	r.parent.prune(false)
 }
 
-func (r *Radix32) find(n uint32, bits, bit int, last *Radix32) *Radix32 {
+func (r *Radix32) find(n uint32, bits, bit int, last *Radix32) (*Radix32, error) {
 	switch r.Leaf() {
 	case false:
 		// A prefix that is matching (BETTER MATCHING)
@@ -259,23 +269,23 @@ func (r *Radix32) find(n uint32, bits, bit int, last *Radix32) *Radix32 {
 		}
 		if r.bits == bits && r.key&mask == n&mask {
 			// our key
-			return r
+			return r, nil
 		}
 
 		k := bitK32(n, bit)
 		if r.branch[k] == nil {
-			return last // REALLY?
+			return last, nil // REALLY?
 		}
 		return r.branch[k].find(n, bits, bit-1, last)
 	case true:
 		// It this our key...!?
 		mask := uint32(mask32 << (bitSize32 - uint(r.bits)))
 		if r.key&mask == n&mask {
-			return r
+			return r, nil
 		}
-		return last
+		return last, nil
 	}
-	panic("bitradix: not reached")
+	return nil, errors.New("bitradix: not reached")
 }
 
 // Return a new node, with r as its parent

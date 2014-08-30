@@ -35,7 +35,7 @@ func TestInsert(t *testing.T) {
 	r := New32()
 	for bits, value := range tests {
 		t.Logf("Inserting %032b/%d\n", bits.key, bits.bit)
-		if x := r.Insert(bits.key, bits.bit, value); x.Value != value {
+		if x, err := r.Insert(bits.key, bits.bit, value); err != nil || x.Value != value {
 			t.Logf("Expected %d, got %d for %d (node type %v)\n", value, x.Value, bits.key, x.Leaf())
 			t.Fail()
 		}
@@ -53,7 +53,7 @@ func TestInsert2(t *testing.T) {
 	r := New32()
 	for bits, value := range tests {
 		t.Logf("Inserting %032b/%d\n", bits.key, bits.bit)
-		if x := r.Insert(bits.key, bits.bit, value); x.Value != value {
+		if x, err := r.Insert(bits.key, bits.bit, value); err != nil || x.Value != value {
 			t.Logf("Expected %d, got %d for %d (node type %v)\n", value, x.Value, bits.key, x.Leaf())
 			t.Fail()
 		}
@@ -70,7 +70,7 @@ func TestInsertIdempotent(t *testing.T) {
 	r.Insert(0x80000000, bits32, 2013)
 	t.Logf("Tree\n")
 	r.Do(func(r1 *Radix32, i int) { t.Logf("(%2d): %032b/%d -> %d\n", i, r1.key, r1.bits, r1.Value) })
-	if x := r.Find(0x80000000, bits32); x.Value != 2013 {
+	if x, err := r.Find(0x80000000, bits32); err != nil || x.Value != 2013 {
 		t.Logf("Expected %d, got %d for %d\n", 2013, x.Value, 0x08)
 		t.Fail()
 	}
@@ -89,8 +89,8 @@ func TestFindExact(t *testing.T) {
 		r.Do(func(r1 *Radix32, i int) { t.Logf("%p (%2d): %032b/%d -> %d\n", r1, i, r1.key, r1.bits, r1.Value) })
 	}
 	for k, v := range tests {
-		x := r.Find(k, bits32)
-		if x == nil {
+		x, err := r.Find(k, bits32)
+		if err != nil || x == nil {
 			t.Logf("Got nil for %032b\n", k)
 			t.Fail()
 			continue
@@ -173,8 +173,8 @@ func findRoute(t *testing.T, r *Radix32, s string) interface{} {
 	_, ipnet, _ := net.ParseCIDR(s)
 	net, mask := ipToUint(t, ipnet)
 	t.Logf("Search %18s %032b/%d\n", s, net, mask)
-	node := r.Find(net, mask)
-	if node == nil {
+	node, err := r.Find(net, mask)
+	if err != nil || node == nil {
 		return uint32(0)
 	}
 	return node.Value

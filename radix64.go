@@ -1,5 +1,7 @@
 package bitradix
 
+import "errors"
+
 // Radix64 implements a radix tree with an uint64 as its key.
 type Radix64 struct {
 	branch [2]*Radix64 // branch[0] is left branch for 0, and branch[1] the right for 1
@@ -29,23 +31,23 @@ func (r *Radix64) Leaf() bool {
 	return r.branch[0] == nil && r.branch[1] == nil
 }
 
-func (r *Radix64) Insert(n uint64, bits int, v interface{}) *Radix64 {
+func (r *Radix64) Insert(n uint64, bits int, v interface{}) (*Radix64, error) {
 	if r.parent != nil {
-		panic("bitradix: not the root node")
+		return nil, ERR_NOT_ROOT
 	}
 	return r.insert(n, bits, v, bitSize32-1)
 }
 
-func (r *Radix64) Remove(n uint64, bits int) *Radix64 {
+func (r *Radix64) Remove(n uint64, bits int) (*Radix64, error) {
 	if r.parent != nil {
-		panic("bitradix: not the root node")
+		return nil, ERR_NOT_ROOT
 	}
-	return r.remove(n, bits, bitSize32-1)
+	return r.remove(n, bits, bitSize32-1), nil
 }
 
-func (r *Radix64) Find(n uint64, bits int) *Radix64 {
+func (r *Radix64) Find(n uint64, bits int) (*Radix64, error) {
 	if r.parent != nil {
-		panic("bitradix: not the root node")
+		return nil, ERR_NOT_ROOT
 	}
 	return r.find(n, bits, bitSize32-1, nil)
 }
@@ -66,16 +68,16 @@ func (r *Radix64) Do(f func(*Radix64, int)) {
 	}
 }
 
-func (r *Radix64) insert(n uint64, bits int, v interface{}, bit int) *Radix64 {
-	if bit < 0 {
-		panic("bitradix: bit index smaller than zero")
-	}
+func (r *Radix64) insert(n uint64, bits int, v interface{}, bit int) (*Radix64, error) {
 	switch r.Leaf() {
 	case false: // Non-leaf node, one or two branches, possibly a key
+		if bit < 0 {
+			return nil, ERR_BIT_INDEX_SMALL
+		}
 		bnew := bitK64(n, bit)
 		if r.bits == 0 && bits == bitSize32-bit { // I should be put here
 			r.set(n, bits, v)
-			return r
+			return r, nil
 		}
 		if r.bits > 0 && bits == bitSize32-bit {
 			bcur := bitK64(r.key, bit)
@@ -88,7 +90,7 @@ func (r *Radix64) insert(n uint64, bits int, v interface{}, bit int) *Radix64 {
 					r.branch[bcur] = r.new()
 				}
 				r.branch[bcur].insert(n1, b1, v1, bit-1)
-				return r
+				return r, nil
 			}
 		}
 		if r.branch[bnew] == nil {
@@ -98,7 +100,10 @@ func (r *Radix64) insert(n uint64, bits int, v interface{}, bit int) *Radix64 {
 	case true: // External node, (optional) key, no branches
 		if r.bits == 0 || r.key == n { // nothing here yet, put something in, or equal keys
 			r.set(n, bits, v)
-			return r
+			return r, nil
+		}
+		if bit < 0 {
+			return nil, ERR_BIT_INDEX_SMALL
 		}
 		bcur := bitK64(r.key, bit)
 		bnew := bitK64(n, bit)
@@ -110,7 +115,7 @@ func (r *Radix64) insert(n uint64, bits int, v interface{}, bit int) *Radix64 {
 				v1 := r.Value
 				r.set(n, bits, v)
 				r.branch[bnew].insert(n1, b1, v1, bit-1)
-				return r
+				return r, nil
 			}
 			if r.bits > 0 && bits >= r.bits {
 				// current key can not be put further down, leave it
@@ -130,7 +135,7 @@ func (r *Radix64) insert(n uint64, bits int, v interface{}, bit int) *Radix64 {
 		r.branch[bnew] = r.new()
 		return r.branch[bnew].insert(n, bits, v, bit-1)
 	}
-	panic("bitradix: not reached")
+	return nil, errors.New("bitradix: not reached")
 }
 
 func (r *Radix64) remove(n uint64, bits, bit int) *Radix64 {
@@ -187,7 +192,7 @@ func (r *Radix64) prune(b bool) {
 		if !b0.Leaf() {
 			return
 		}
-		// move b0 into this node	
+		// move b0 into this node
 		r.set(b0.key, b0.bits, b0.Value)
 		r.branch[0] = b0.branch[0]
 		r.branch[1] = b0.branch[1]
@@ -204,7 +209,7 @@ func (r *Radix64) prune(b bool) {
 	r.parent.prune(false)
 }
 
-func (r *Radix64) find(n uint64, bits, bit int, last *Radix64) *Radix64 {
+func (r *Radix64) find(n uint64, bits, bit int, last *Radix64) (*Radix64, error) {
 	switch r.Leaf() {
 	case false:
 		// A prefix that is matching (BETTER MATCHING)
@@ -222,23 +227,23 @@ func (r *Radix64) find(n uint64, bits, bit int, last *Radix64) *Radix64 {
 		}
 		if r.bits == bits && r.key&mask == n&mask {
 			// our key
-			return r
+			return r, nil
 		}
 
 		k := bitK64(n, bit)
 		if r.branch[k] == nil {
-			return last // REALLY?
+			return last, nil // REALLY?
 		}
 		return r.branch[k].find(n, bits, bit-1, last)
 	case true:
 		// It this our key...!?
 		mask := uint64(mask64 << (bitSize32 - uint(r.bits)))
 		if r.key&mask == n&mask {
-			return r
+			return r, nil
 		}
-		return last
+		return last, nil
 	}
-	panic("bitradix: not reached")
+	return nil, errors.New("bitradix: not reached")
 }
 
 func (r *Radix64) new() *Radix64 {

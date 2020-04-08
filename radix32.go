@@ -111,11 +111,11 @@ func (r *Radix32) Do(f func(*Radix32, int)) {
 // Implement insert
 func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) (*Radix32, error) {
 	var err error
-	if bit < 0 {
-		return nil, ERR_BIT_INDEX_SMALL
-	}
 	switch r.Leaf() {
 	case false: // Non-leaf node, one or two branches, possibly a key
+		if bit < 0 {
+			return nil, ERR_BIT_INDEX_SMALL
+		}
 		bnew := bitK32(n, bit)
 		if r.bits == 0 && bits == bitSize32-bit { // I should be put here
 			r.set(n, bits, v)
@@ -143,6 +143,9 @@ func (r *Radix32) insert(n uint32, bits int, v interface{}, bit int) (*Radix32, 
 		if r.bits == 0 || r.key == n { // nothing here yet, put something in, or equal keys
 			r.set(n, bits, v)
 			return r, nil
+		}
+		if bit < 0 {
+			return nil, ERR_BIT_INDEX_SMALL
 		}
 		bcur := bitK32(r.key, bit)
 		bnew := bitK32(n, bit)
